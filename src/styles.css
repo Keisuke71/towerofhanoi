@@ -261,6 +261,8 @@ select {
 .disk {
   bottom: var(--disk-bottom);
   z-index: calc(2 + var(--level));
+  display: grid;
+  place-items: center;
   width: var(--disk-width);
   height: clamp(21px, 3.8vh, 28px);
   border: 1px solid rgba(23, 32, 38, 0.22);
@@ -271,10 +273,16 @@ select {
   box-shadow:
     inset 0 -5px 0 rgba(0, 0, 0, 0.16),
     0 8px 14px rgba(23, 32, 38, 0.16);
+  color: #ffffff;
+  font-size: 0.82rem;
+  font-weight: 900;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(23, 32, 38, 0.52);
   transition:
     bottom 160ms ease,
     transform 160ms ease,
     width 160ms ease;
+  user-select: none;
 }
 
 .top-disk {

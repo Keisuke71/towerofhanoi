@@ -323,6 +323,8 @@ function render(): void {
       diskElement.style.setProperty("--disk-width", `${width}%`);
       diskElement.style.setProperty("--disk-bottom", `${30 + level * 30}px`);
       diskElement.style.setProperty("--disk-color", diskColors[(disk - 1) % diskColors.length]);
+      diskElement.textContent = String(disk);
+      diskElement.setAttribute("aria-label", `ディスク ${disk}`);
       diskElement.draggable = isTopDisk && !won;
 
       if (isTopDisk) {
