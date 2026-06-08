@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ハノイの塔</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>ハノイの塔</h1>
+            <p id="gameState">準備完了</p>
+          </div>
+        </div>
+        <dl class="stats" aria-label="ゲーム統計">
+          <div>
+            <dt>手数</dt>
+            <dd id="moveCount">0</dd>
+          </div>
+          <div>
+            <dt>最短</dt>
+            <dd id="minimumMoves">15</dd>
+          </div>
+          <div>
+            <dt>時間</dt>
+            <dd id="timer">00:00</dd>
+          </div>
+        </dl>
+      </header>
+
+      <main class="play-area">
+        <section class="toolbar" aria-label="ゲーム操作">
+          <label class="select-field" for="diskCount">
+            <span>ディスク</span>
+            <select id="diskCount">
+              <option value="3">3</option>
+              <option value="4" selected>4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+              <option value="8">8</option>
+            </select>
+          </label>
+          <button id="resetButton" type="button">リセット</button>
+          <button id="undoButton" type="button">戻す</button>
+          <button id="hintButton" type="button">ヒント</button>
+          <button id="stepButton" type="button">一手進める</button>
+        </section>
+
+        <section id="board" class="board" aria-label="ハノイの塔の盤面"></section>
+
+        <section class="status-bar" aria-live="polite">
+          <p id="message">左の塔から右の塔へすべて移動します。</p>
+          <p id="hintText"></p>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./dist/main.js"></script>
+  </body>
+</html>
