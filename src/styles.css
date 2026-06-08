@@ -168,6 +168,10 @@ select {
   background: var(--accent);
 }
 
+.toolbar button:nth-of-type(5) {
+  background: var(--success);
+}
+
 .toolbar button:hover:not(:disabled) {
   transform: translateY(-1px);
 }

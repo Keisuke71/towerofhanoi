@@ -16,6 +16,8 @@ const resetButton = document.querySelector("#resetButton");
 const undoButton = document.querySelector("#undoButton");
 const hintButton = document.querySelector("#hintButton");
 const stepButton = document.querySelector("#stepButton");
+const autoButton = document.querySelector("#autoButton");
+const autoSpeedSelect = document.querySelector("#autoSpeed");
 const moveCount = document.querySelector("#moveCount");
 const minimumMoveCount = document.querySelector("#minimumMoves");
 const timer = document.querySelector("#timer");
@@ -30,6 +32,8 @@ if (
   !undoButton ||
   !hintButton ||
   !stepButton ||
+  !autoButton ||
+  !autoSpeedSelect ||
   !moveCount ||
   !minimumMoveCount ||
   !timer ||
@@ -49,6 +53,7 @@ let currentHint = null;
 let startedAt = null;
 let elapsedBeforeStart = 0;
 let timerId = null;
+let autoplayId = null;
 let won = false;
 
 function asPegIndex(value) {
@@ -104,7 +109,26 @@ function setHint(move) {
   currentHint = move;
   hintText.textContent = move ? `ヒント: ${describeMove(move)}` : "";
 }
+function isAutoplaying() {
+  return autoplayId !== null;
+}
+function getAutoplayDelay() {
+  return Number(autoSpeedSelect.value);
+}
+function stopAutoplay(options = {}) {
+  if (autoplayId !== null) {
+    window.clearInterval(autoplayId);
+  }
+  autoplayId = null;
+  if (options.message) {
+    setMessage(options.message);
+  }
+  if (options.renderView ?? true) {
+    render();
+  }
+}
 function resetGame(nextDiskCount = diskCount) {
+  stopAutoplay({ renderView: false });
   diskCount = nextDiskCount;
   pegs = createInitialPegs(diskCount);
   selectedPeg = null;
@@ -151,7 +175,7 @@ function selectPeg(peg) {
   render();
 }
 function handlePegAction(peg) {
-  if (won) {
+  if (won || isAutoplaying()) {
     return;
   }
   if (selectedPeg === null) {
@@ -171,6 +195,9 @@ function handlePegAction(peg) {
   selectPeg(peg);
 }
 function undoMove() {
+  if (isAutoplaying()) {
+    return;
+  }
   const lastMove = moveHistory.pop();
   if (!lastMove) {
     setMessage("戻せる手がありません。");
@@ -195,6 +222,9 @@ function undoMove() {
   render();
 }
 function showHint() {
+  if (isAutoplaying()) {
+    return;
+  }
   const hint = findHint(pegs, diskCount);
   if (!hint) {
     setMessage(won ? "完成しています。" : "ヒントを見つけられませんでした。");
@@ -205,6 +235,9 @@ function showHint() {
   render();
 }
 function stepHint() {
+  if (isAutoplaying()) {
+    return;
+  }
   const hint = currentHint ?? findHint(pegs, diskCount);
   if (!hint) {
     setMessage(won ? "完成しています。" : "進める手がありません。");
@@ -212,12 +245,59 @@ function stepHint() {
   }
   applyMove(hint.from, hint.to);
 }
+function runAutoplayStep() {
+  if (won) {
+    stopAutoplay({ renderView: false });
+    return;
+  }
+  const hint = findHint(pegs, diskCount);
+  if (!hint) {
+    stopAutoplay({ message: "進める手がありません。" });
+    return;
+  }
+  applyMove(hint.from, hint.to);
+  if (won) {
+    stopAutoplay({ renderView: true });
+  }
+}
+function startAutoplay() {
+  if (won || isAutoplaying()) {
+    return;
+  }
+  selectedPeg = null;
+  draggedPeg = null;
+  clearHint();
+  setMessage("オートプレイ中です。");
+  autoplayId = window.setInterval(runAutoplayStep, getAutoplayDelay());
+  render();
+  runAutoplayStep();
+}
+function toggleAutoplay() {
+  if (isAutoplaying()) {
+    stopAutoplay({ message: "オートプレイを停止しました。" });
+    return;
+  }
+  startAutoplay();
+}
+function restartAutoplayTimer() {
+  if (autoplayId === null) {
+    return;
+  }
+  window.clearInterval(autoplayId);
+  autoplayId = window.setInterval(runAutoplayStep, getAutoplayDelay());
+}
 function render() {
+  const autoplaying = isAutoplaying();
   board.innerHTML = "";
   moveCount.textContent = String(moveHistory.length);
   minimumMoveCount.textContent = String(minimumMoves(diskCount));
-  gameState.textContent = won ? "完成" : selectedPeg === null ? "プレイ中" : `${pegNames[selectedPeg]} 選択中`;
-  undoButton.disabled = moveHistory.length === 0;
+  gameState.textContent = won ? "完成" : autoplaying ? "オートプレイ中" : selectedPeg === null ? "プレイ中" : `${pegNames[selectedPeg]} 選択中`;
+  diskCountSelect.disabled = autoplaying;
+  undoButton.disabled = autoplaying || moveHistory.length === 0;
+  hintButton.disabled = autoplaying || won;
+  stepButton.disabled = autoplaying || won;
+  autoButton.disabled = won;
+  autoButton.textContent = autoplaying ? "停止" : "オート再生";
   pegs.forEach((pegDisks, rawPegIndex) => {
     const pegIndex = asPegIndex(rawPegIndex);
     const pegElement = document.createElement("button");
@@ -268,7 +348,7 @@ function render() {
       diskElement.style.setProperty("--disk-color", diskColors[(disk - 1) % diskColors.length]);
       diskElement.textContent = String(disk);
       diskElement.setAttribute("aria-label", `ディスク ${disk}`);
-      diskElement.draggable = isTopDisk && !won;
+      diskElement.draggable = isTopDisk && !won && !autoplaying;
       if (isTopDisk) {
         diskElement.classList.add("top-disk");
       }
@@ -276,7 +356,7 @@ function render() {
         diskElement.classList.add("selected-disk");
       }
       diskElement.addEventListener("dragstart", (event) => {
-        if (!isTopDisk || won) {
+        if (!isTopDisk || won || autoplaying) {
           event.preventDefault();
           return;
         }
@@ -304,4 +384,6 @@ resetButton.addEventListener("click", () => resetGame());
 undoButton.addEventListener("click", undoMove);
 hintButton.addEventListener("click", showHint);
 stepButton.addEventListener("click", stepHint);
+autoButton.addEventListener("click", toggleAutoplay);
+autoSpeedSelect.addEventListener("change", restartAutoplayTimer);
 resetGame();

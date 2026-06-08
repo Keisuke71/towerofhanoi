@@ -49,6 +49,15 @@
           <button id="undoButton" type="button">戻す</button>
           <button id="hintButton" type="button">ヒント</button>
           <button id="stepButton" type="button">一手進める</button>
+          <button id="autoButton" type="button">オート再生</button>
+          <label class="select-field" for="autoSpeed">
+            <span>速度</span>
+            <select id="autoSpeed">
+              <option value="900">ゆっくり</option>
+              <option value="520" selected>標準</option>
+              <option value="240">高速</option>
+            </select>
+          </label>
         </section>
 
         <section id="board" class="board" aria-label="ハノイの塔の盤面"></section>
