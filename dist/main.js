@@ -1,61 +1,50 @@
-import {
-  canMove,
-  createInitialPegs,
-  findHint,
-  formatDuration,
-  isSolved,
-  minimumMoves,
-  moveDisk,
-  pegNames
-} from "./game.js";
-
+import { canMove, createInitialPegs, findHint, formatDuration, isSolved, minimumMoves, moveDisk, pegNames } from "./game.js";
 const diskColors = ["#f06449", "#f6ae2d", "#4d9078", "#277da1", "#6d597a", "#43aa8b", "#bc4749", "#355070"];
-const board = document.querySelector("#board");
-const diskCountSelect = document.querySelector("#diskCount");
-const resetButton = document.querySelector("#resetButton");
-const undoButton = document.querySelector("#undoButton");
-const hintButton = document.querySelector("#hintButton");
-const stepButton = document.querySelector("#stepButton");
-const autoButton = document.querySelector("#autoButton");
-const autoSpeedSelect = document.querySelector("#autoSpeed");
-const moveCount = document.querySelector("#moveCount");
-const minimumMoveCount = document.querySelector("#minimumMoves");
-const timer = document.querySelector("#timer");
-const message = document.querySelector("#message");
-const hintText = document.querySelector("#hintText");
-const gameState = document.querySelector("#gameState");
-
-if (
-  !board ||
-  !diskCountSelect ||
-  !resetButton ||
-  !undoButton ||
-  !hintButton ||
-  !stepButton ||
-  !autoButton ||
-  !autoSpeedSelect ||
-  !moveCount ||
-  !minimumMoveCount ||
-  !timer ||
-  !message ||
-  !hintText ||
-  !gameState
-) {
-  throw new Error("Required DOM elements are missing");
+function requiredElement(selector) {
+  const element = document.querySelector(selector);
+  if (!element) {
+    throw new Error(`Required DOM element is missing: ${selector}`);
+  }
+  return element;
 }
-
+const board = requiredElement("#board");
+const diskCountSelect = requiredElement("#diskCount");
+const resetButton = requiredElement("#resetButton");
+const undoButton = requiredElement("#undoButton");
+const hintButton = requiredElement("#hintButton");
+const stepButton = requiredElement("#stepButton");
+const autoButton = requiredElement("#autoButton");
+const autoSpeedSelect = requiredElement("#autoSpeed");
+const moveCount = requiredElement("#moveCount");
+const minimumMoveCount = requiredElement("#minimumMoves");
+const timer = requiredElement("#timer");
+const message = requiredElement("#message");
+const hintText = requiredElement("#hintText");
+const gameState = requiredElement("#gameState");
+const logPanel = requiredElement("#logPanel");
+const logToggleButton = requiredElement("#logToggleButton");
+const logCount = requiredElement("#logCount");
+const logList = requiredElement("#logList");
+const logEmptyState = requiredElement("#logEmptyState");
+const exportLogButton = requiredElement("#exportLogButton");
+const operationLabels = {
+  move: "移動",
+  step: "一手進める",
+  auto: "オート再生",
+  undo: "戻す"
+};
 let diskCount = Number(diskCountSelect.value);
 let pegs = createInitialPegs(diskCount);
 let selectedPeg = null;
 let draggedPeg = null;
 let moveHistory = [];
+let operationLog = [];
 let currentHint = null;
 let startedAt = null;
 let elapsedBeforeStart = 0;
 let timerId = null;
 let autoplayId = null;
 let won = false;
-
 function asPegIndex(value) {
   if (value !== 0 && value !== 1 && value !== 2) {
     throw new Error(`Invalid peg index: ${value}`);
@@ -101,6 +90,76 @@ function setMessage(text) {
 function describeMove(move) {
   return `${pegNames[move.from]} -> ${pegNames[move.to]}`;
 }
+function formatElapsedSeconds(milliseconds) {
+  return (Math.round(milliseconds / 10) / 100).toFixed(2);
+}
+function csvEscape(value) {
+  const stringValue = String(value);
+  return /[",\n\r]/.test(stringValue) ? `"${stringValue.replaceAll('"', '""')}"` : stringValue;
+}
+function renderOperationLog() {
+  logList.innerHTML = "";
+  logCount.textContent = String(operationLog.length);
+  logEmptyState.hidden = operationLog.length > 0;
+  exportLogButton.disabled = operationLog.length === 0;
+  operationLog.forEach((entry) => {
+    const item = document.createElement("li");
+    item.className = "log-item";
+    const timestamp = document.createElement("span");
+    timestamp.className = "log-time";
+    timestamp.textContent = entry.timestamp;
+    const detail = document.createElement("span");
+    detail.className = "log-detail";
+    const action = document.createElement("span");
+    action.className = "log-action";
+    action.textContent = `${operationLabels[entry.action]} ${pegNames[entry.from]} -> ${pegNames[entry.to]}`;
+    const meta = document.createElement("span");
+    meta.className = "log-meta";
+    meta.textContent = `ディスク ${entry.disk} / 手数 ${entry.moveCount}`;
+    detail.append(action, meta);
+    item.append(timestamp, detail);
+    logList.append(item);
+  });
+  logList.scrollTop = logList.scrollHeight;
+}
+function recordOperation(action, move) {
+  const elapsed = getElapsed();
+  operationLog.push({
+    sequence: operationLog.length + 1,
+    timestamp: formatDuration(elapsed),
+    elapsedSeconds: formatElapsedSeconds(elapsed),
+    action,
+    disk: move.disk,
+    from: move.from,
+    to: move.to,
+    moveCount: moveHistory.length
+  });
+}
+function createLogCsv() {
+  const rows = [
+    ["index", "timestamp", "timestamp_seconds", "operation", "disk", "from", "to", "move_count"],
+    ...operationLog.map((entry) => [
+      entry.sequence,
+      entry.timestamp,
+      entry.elapsedSeconds,
+      operationLabels[entry.action],
+      entry.disk,
+      pegNames[entry.from],
+      pegNames[entry.to],
+      entry.moveCount
+    ])
+  ];
+  return rows.map((row) => row.map(csvEscape).join(",")).join("\n");
+}
+function exportOperationLog() {
+  const blob = new Blob([`\uFEFF${createLogCsv()}`], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = `tower-of-hanoi-log-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 function clearHint() {
   currentHint = null;
   hintText.textContent = "";
@@ -134,13 +193,14 @@ function resetGame(nextDiskCount = diskCount) {
   selectedPeg = null;
   draggedPeg = null;
   moveHistory = [];
+  operationLog = [];
   won = false;
   clearHint();
   resetTimer();
   setMessage("左の塔から右の塔へすべて移動します。");
   render();
 }
-function applyMove(from, to, options = { record: true }) {
+function applyMove(from, to, options = {}) {
   const moved = moveDisk(pegs, from, to);
   if (!moved) {
     setMessage("その移動はできません。");
@@ -148,9 +208,10 @@ function applyMove(from, to, options = { record: true }) {
     return false;
   }
   pegs = moved.pegs;
-  if (options.record) {
+  if (options.record ?? true) {
     moveHistory.push(moved.move);
     startTimer();
+    recordOperation(options.action ?? "move", moved.move);
   }
   selectedPeg = null;
   clearHint();
@@ -158,7 +219,8 @@ function applyMove(from, to, options = { record: true }) {
   if (won) {
     stopTimer();
     setMessage(`${moveHistory.length}手で完成しました。`);
-  } else {
+  }
+  else {
     setMessage(`${describeMove(moved.move)} に移動しました。`);
   }
   render();
@@ -168,7 +230,8 @@ function selectPeg(peg) {
   if (pegs[peg].length === 0) {
     selectedPeg = null;
     setMessage("ディスクのある塔を選んでください。");
-  } else {
+  }
+  else {
     selectedPeg = peg;
     setMessage(`${pegNames[peg]} を選択中です。`);
   }
@@ -213,9 +276,11 @@ function undoMove() {
   selectedPeg = null;
   won = false;
   clearHint();
+  recordOperation("undo", moved.move);
   if (moveHistory.length === 0) {
     resetTimer();
-  } else {
+  }
+  else {
     startTimer();
   }
   setMessage(`${describeMove({ from: lastMove.to, to: lastMove.from, disk: lastMove.disk })} に戻しました。`);
@@ -243,7 +308,7 @@ function stepHint() {
     setMessage(won ? "完成しています。" : "進める手がありません。");
     return;
   }
-  applyMove(hint.from, hint.to);
+  applyMove(hint.from, hint.to, { action: "step" });
 }
 function runAutoplayStep() {
   if (won) {
@@ -255,7 +320,7 @@ function runAutoplayStep() {
     stopAutoplay({ message: "進める手がありません。" });
     return;
   }
-  applyMove(hint.from, hint.to);
+  applyMove(hint.from, hint.to, { action: "auto" });
   if (won) {
     stopAutoplay({ renderView: true });
   }
@@ -298,6 +363,7 @@ function render() {
   stepButton.disabled = autoplaying || won;
   autoButton.disabled = won;
   autoButton.textContent = autoplaying ? "停止" : "オート再生";
+  renderOperationLog();
   pegs.forEach((pegDisks, rawPegIndex) => {
     const pegIndex = asPegIndex(rawPegIndex);
     const pegElement = document.createElement("button");
@@ -376,7 +442,6 @@ function render() {
     board.append(pegElement);
   });
 }
-
 diskCountSelect.addEventListener("change", () => {
   resetGame(Number(diskCountSelect.value));
 });
@@ -386,4 +451,9 @@ hintButton.addEventListener("click", showHint);
 stepButton.addEventListener("click", stepHint);
 autoButton.addEventListener("click", toggleAutoplay);
 autoSpeedSelect.addEventListener("change", restartAutoplayTimer);
+logToggleButton.addEventListener("click", () => {
+  const collapsed = logPanel.classList.toggle("collapsed");
+  logToggleButton.setAttribute("aria-expanded", String(!collapsed));
+});
+exportLogButton.addEventListener("click", exportOperationLog);
 resetGame();
