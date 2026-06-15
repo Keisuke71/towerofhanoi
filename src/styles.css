@@ -342,6 +342,10 @@ select {
   background: var(--success);
 }
 
+.toolbar button:nth-of-type(6) {
+  background: var(--accent-strong);
+}
+
 .toolbar button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
@@ -349,6 +353,14 @@ select {
 .toolbar button:disabled {
   cursor: not-allowed;
   opacity: 0.4;
+}
+
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .board {

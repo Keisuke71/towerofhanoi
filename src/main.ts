@@ -30,6 +30,8 @@ const undoButton = requiredElement<HTMLButtonElement>("#undoButton");
 const hintButton = requiredElement<HTMLButtonElement>("#hintButton");
 const stepButton = requiredElement<HTMLButtonElement>("#stepButton");
 const autoButton = requiredElement<HTMLButtonElement>("#autoButton");
+const importLogButton = requiredElement<HTMLButtonElement>("#importLogButton");
+const importLogInput = requiredElement<HTMLInputElement>("#importLogInput");
 const autoSpeedSelect = requiredElement<HTMLSelectElement>("#autoSpeed");
 const moveCount = requiredElement<HTMLElement>("#moveCount");
 const minimumMoveCount = requiredElement<HTMLElement>("#minimumMoves");
@@ -57,12 +59,35 @@ interface OperationLogEntry {
   moveCount: number;
 }
 
+interface ImportedOperation {
+  rowNumber: number;
+  action: OperationLogAction;
+  disk: number | null;
+  from: PegIndex;
+  to: PegIndex;
+  timestamp: string | null;
+  elapsedSeconds: string | null;
+  moveCount: number | null;
+}
+
 const operationLabels: Record<OperationLogAction, string> = {
   move: "移動",
   step: "一手進める",
   auto: "オート再生",
   undo: "戻す"
 };
+
+const operationLabelLookup = new Map<string, OperationLogAction>([
+  ["move", "move"],
+  ["移動", "move"],
+  ["step", "step"],
+  ["一手進める", "step"],
+  ["auto", "auto"],
+  ["autoplay", "auto"],
+  ["オート再生", "auto"],
+  ["undo", "undo"],
+  ["戻す", "undo"]
+]);
 
 let diskCount = Number(diskCountSelect.value);
 let pegs = createInitialPegs(diskCount);
@@ -75,6 +100,9 @@ let startedAt: number | null = null;
 let elapsedBeforeStart = 0;
 let timerId: number | null = null;
 let autoplayId: number | null = null;
+let replayId: number | null = null;
+let replaySteps: ImportedOperation[] = [];
+let replayCursor = 0;
 let won = false;
 
 function asPegIndex(value: number): PegIndex {
@@ -142,6 +170,164 @@ function formatElapsedSeconds(milliseconds: number): string {
 function csvEscape(value: string | number): string {
   const stringValue = String(value);
   return /[",\n\r]/.test(stringValue) ? `"${stringValue.replaceAll('"', '""')}"` : stringValue;
+}
+
+function parseCsvRows(csv: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+
+  const source = csv.replace(/^\uFEFF/, "");
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+
+    if (quoted) {
+      if (char === '"' && source[index + 1] === '"') {
+        field += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        field += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n" || char === "\r") {
+      row.push(field);
+      field = "";
+      if (row.some((cell) => cell.trim() !== "")) {
+        rows.push(row);
+      }
+      row = [];
+
+      if (char === "\r" && source[index + 1] === "\n") {
+        index += 1;
+      }
+    } else {
+      field += char;
+    }
+  }
+
+  if (quoted) {
+    throw new Error("CSVの引用符が閉じていません。");
+  }
+
+  row.push(field);
+  if (row.some((cell) => cell.trim() !== "")) {
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function normalizeCsvHeader(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function csvCell(row: string[], column: number | null): string {
+  return column === null ? "" : (row[column] ?? "").trim();
+}
+
+function findCsvColumn(headers: string[], name: string): number | null {
+  const index = headers.indexOf(name);
+  return index === -1 ? null : index;
+}
+
+function parsePegCell(value: string, rowNumber: number, columnName: string): PegIndex {
+  const normalized = value.trim().toUpperCase();
+  const namedPeg = pegNames.findIndex((name) => name === normalized);
+
+  if (namedPeg !== -1) {
+    return asPegIndex(namedPeg);
+  }
+
+  const numericPeg = Number(normalized);
+  if (Number.isInteger(numericPeg) && numericPeg >= 0 && numericPeg <= 2) {
+    return asPegIndex(numericPeg);
+  }
+
+  throw new Error(`${rowNumber}行目の${columnName}列が不正です。A/B/C または 0/1/2 を指定してください。`);
+}
+
+function parseOptionalPositiveInteger(value: string, rowNumber: number, columnName: string): number | null {
+  if (value === "") {
+    return null;
+  }
+
+  const numberValue = Number(value);
+  if (!Number.isInteger(numberValue) || numberValue < 1) {
+    throw new Error(`${rowNumber}行目の${columnName}列が不正です。`);
+  }
+
+  return numberValue;
+}
+
+function parseOptionalNonNegativeInteger(value: string, rowNumber: number, columnName: string): number | null {
+  if (value === "") {
+    return null;
+  }
+
+  const numberValue = Number(value);
+  if (!Number.isInteger(numberValue) || numberValue < 0) {
+    throw new Error(`${rowNumber}行目の${columnName}列が不正です。`);
+  }
+
+  return numberValue;
+}
+
+function parseOperationAction(value: string): OperationLogAction {
+  const normalized = value.trim().toLowerCase();
+  return operationLabelLookup.get(normalized) ?? "move";
+}
+
+function parseOperationLogCsv(csv: string): ImportedOperation[] {
+  const rows = parseCsvRows(csv);
+
+  if (rows.length < 2) {
+    throw new Error("CSVに再生できる操作がありません。");
+  }
+
+  const headers = rows[0].map(normalizeCsvHeader);
+  const fromColumn = findCsvColumn(headers, "from");
+  const toColumn = findCsvColumn(headers, "to");
+
+  if (fromColumn === null || toColumn === null) {
+    throw new Error("CSVに from/to 列がありません。");
+  }
+
+  const operationColumn = findCsvColumn(headers, "operation");
+  const diskColumn = findCsvColumn(headers, "disk");
+  const timestampColumn = findCsvColumn(headers, "timestamp");
+  const elapsedSecondsColumn = findCsvColumn(headers, "timestamp_seconds");
+  const moveCountColumn = findCsvColumn(headers, "move_count");
+
+  const steps = rows.slice(1).map((row, index) => {
+    const rowNumber = index + 2;
+    return {
+      rowNumber,
+      action: parseOperationAction(csvCell(row, operationColumn)),
+      disk: parseOptionalPositiveInteger(csvCell(row, diskColumn), rowNumber, "disk"),
+      from: parsePegCell(csvCell(row, fromColumn), rowNumber, "from"),
+      to: parsePegCell(csvCell(row, toColumn), rowNumber, "to"),
+      timestamp: csvCell(row, timestampColumn) || null,
+      elapsedSeconds: csvCell(row, elapsedSecondsColumn) || null,
+      moveCount: parseOptionalNonNegativeInteger(csvCell(row, moveCountColumn), rowNumber, "move_count")
+    };
+  });
+
+  if (steps.length === 0) {
+    throw new Error("CSVに再生できる操作がありません。");
+  }
+
+  return steps;
 }
 
 function renderOperationLog(): void {
@@ -233,6 +419,14 @@ function isAutoplaying(): boolean {
   return autoplayId !== null;
 }
 
+function isReplaying(): boolean {
+  return replayId !== null;
+}
+
+function isPlaybackLocked(): boolean {
+  return isAutoplaying() || isReplaying();
+}
+
 function getAutoplayDelay(): number {
   return Number(autoSpeedSelect.value);
 }
@@ -253,9 +447,29 @@ function stopAutoplay(options: { message?: string; renderView?: boolean } = {}):
   }
 }
 
+function stopImportedReplay(options: { message?: string; renderView?: boolean } = {}): void {
+  if (replayId !== null) {
+    window.clearInterval(replayId);
+  }
+
+  replayId = null;
+  replaySteps = [];
+  replayCursor = 0;
+
+  if (options.message) {
+    setMessage(options.message);
+  }
+
+  if (options.renderView ?? true) {
+    render();
+  }
+}
+
 function resetGame(nextDiskCount = diskCount): void {
   stopAutoplay({ renderView: false });
+  stopImportedReplay({ renderView: false });
   diskCount = nextDiskCount;
+  diskCountSelect.value = String(diskCount);
   pegs = createInitialPegs(diskCount);
   selectedPeg = null;
   draggedPeg = null;
@@ -266,6 +480,117 @@ function resetGame(nextDiskCount = diskCount): void {
   resetTimer();
   setMessage("左の塔から右の塔へすべて移動します。");
   render();
+}
+
+function appendImportedOperation(step: ImportedOperation, move: Move): void {
+  operationLog.push({
+    sequence: operationLog.length + 1,
+    timestamp: step.timestamp ?? formatDuration(getElapsed()),
+    elapsedSeconds: step.elapsedSeconds ?? formatElapsedSeconds(getElapsed()),
+    action: step.action,
+    disk: move.disk,
+    from: move.from,
+    to: move.to,
+    moveCount: step.moveCount ?? moveHistory.length
+  });
+}
+
+function applyImportedStep(step: ImportedOperation): boolean {
+  const moved = moveDisk(pegs, step.from, step.to);
+
+  if (!moved) {
+    setMessage(`${step.rowNumber}行目の移動はできません。`);
+    return false;
+  }
+
+  if (step.disk !== null && moved.move.disk !== step.disk) {
+    setMessage(`${step.rowNumber}行目のディスク番号が盤面と一致しません。`);
+    return false;
+  }
+
+  if (step.action === "undo") {
+    const lastMove = moveHistory.at(-1);
+    const matchesLastMove =
+      lastMove?.from === moved.move.to && lastMove.to === moved.move.from && lastMove.disk === moved.move.disk;
+
+    if (!matchesLastMove) {
+      setMessage(`${step.rowNumber}行目の戻す操作が履歴と一致しません。`);
+      return false;
+    }
+
+    moveHistory.pop();
+  } else {
+    moveHistory.push(moved.move);
+  }
+
+  pegs = moved.pegs;
+  appendImportedOperation(step, moved.move);
+  selectedPeg = null;
+  draggedPeg = null;
+  clearHint();
+  won = isSolved(pegs, diskCount);
+  setMessage(`${step.rowNumber}行目: ${describeMove(moved.move)} を再生しました。`);
+  return true;
+}
+
+function finishImportedReplay(): void {
+  const replayedCount = operationLog.length;
+  if (replayId !== null) {
+    window.clearInterval(replayId);
+  }
+  replayId = null;
+  replaySteps = [];
+  replayCursor = 0;
+
+  if (won) {
+    stopTimer();
+    setMessage(`CSVの再生が完了しました。${moveHistory.length}手で完成しています。`);
+  } else {
+    setMessage(`CSVの再生が完了しました。${replayedCount}件の操作を再生しました。`);
+  }
+
+  render();
+}
+
+function runImportedReplayStep(): void {
+  const step = replaySteps[replayCursor];
+
+  if (!step) {
+    finishImportedReplay();
+    return;
+  }
+
+  if (!applyImportedStep(step)) {
+    stopImportedReplay({ renderView: false });
+    stopTimer();
+    render();
+    return;
+  }
+
+  replayCursor += 1;
+  render();
+
+  if (replayCursor >= replaySteps.length) {
+    finishImportedReplay();
+  }
+}
+
+function startImportedReplay(steps: ImportedOperation[]): void {
+  const maxDiskInLog = steps.reduce((maxDisk, step) => Math.max(maxDisk, step.disk ?? 0), 0);
+  const nextDiskCount = Math.max(diskCount, maxDiskInLog);
+
+  if (nextDiskCount > 8) {
+    throw new Error("CSVのディスク番号が8を超えています。");
+  }
+
+  resetGame(nextDiskCount);
+  replaySteps = steps;
+  replayCursor = 0;
+  replayId = window.setInterval(runImportedReplayStep, getAutoplayDelay());
+  startTimer();
+  setMessage(`CSVから${steps.length}件の操作を読み込みました。`);
+  render();
+  runImportedReplayStep();
 }
 
 function applyMove(
@@ -317,7 +642,7 @@ function selectPeg(peg: PegIndex): void {
 }
 
 function handlePegAction(peg: PegIndex): void {
-  if (won || isAutoplaying()) {
+  if (won || isPlaybackLocked()) {
     return;
   }
 
@@ -342,7 +667,7 @@ function handlePegAction(peg: PegIndex): void {
 }
 
 function undoMove(): void {
-  if (isAutoplaying()) {
+  if (isPlaybackLocked()) {
     return;
   }
 
@@ -378,7 +703,7 @@ function undoMove(): void {
 }
 
 function showHint(): void {
-  if (isAutoplaying()) {
+  if (isPlaybackLocked()) {
     return;
   }
 
@@ -395,7 +720,7 @@ function showHint(): void {
 }
 
 function stepHint(): void {
-  if (isAutoplaying()) {
+  if (isPlaybackLocked()) {
     return;
   }
 
@@ -453,25 +778,54 @@ function toggleAutoplay(): void {
 }
 
 function restartAutoplayTimer(): void {
-  if (autoplayId === null) {
-    return;
+  if (autoplayId !== null) {
+    window.clearInterval(autoplayId);
+    autoplayId = window.setInterval(runAutoplayStep, getAutoplayDelay());
   }
 
-  window.clearInterval(autoplayId);
-  autoplayId = window.setInterval(runAutoplayStep, getAutoplayDelay());
+  if (replayId !== null) {
+    window.clearInterval(replayId);
+    replayId = window.setInterval(runImportedReplayStep, getAutoplayDelay());
+  }
+}
+
+async function importOperationLog(file: File): Promise<void> {
+  try {
+    const csv = await file.text();
+    const steps = parseOperationLogCsv(csv);
+    startImportedReplay(steps);
+  } catch (error) {
+    stopImportedReplay({ renderView: false });
+    setMessage(error instanceof Error ? error.message : "CSVの読み込みに失敗しました。");
+    render();
+  } finally {
+    importLogInput.value = "";
+  }
 }
 
 function render(): void {
   const autoplaying = isAutoplaying();
+  const replaying = isReplaying();
+  const playbackLocked = autoplaying || replaying;
   board.innerHTML = "";
   moveCount.textContent = String(moveHistory.length);
   minimumMoveCount.textContent = String(minimumMoves(diskCount));
-  gameState.textContent = won ? "完成" : autoplaying ? "オートプレイ中" : selectedPeg === null ? "プレイ中" : `${pegNames[selectedPeg]} 選択中`;
-  diskCountSelect.disabled = autoplaying;
-  undoButton.disabled = autoplaying || moveHistory.length === 0;
-  hintButton.disabled = autoplaying || won;
-  stepButton.disabled = autoplaying || won;
-  autoButton.disabled = won;
+  gameState.textContent = won
+    ? "完成"
+    : replaying
+      ? "ログ再生中"
+      : autoplaying
+        ? "オートプレイ中"
+        : selectedPeg === null
+          ? "プレイ中"
+          : `${pegNames[selectedPeg]} 選択中`;
+  diskCountSelect.disabled = playbackLocked;
+  undoButton.disabled = playbackLocked || moveHistory.length === 0;
+  hintButton.disabled = playbackLocked || won;
+  stepButton.disabled = playbackLocked || won;
+  autoButton.disabled = won || replaying;
+  importLogButton.disabled = playbackLocked;
+  importLogInput.disabled = playbackLocked;
   autoButton.textContent = autoplaying ? "停止" : "オート再生";
   renderOperationLog();
 
@@ -498,14 +852,14 @@ function render(): void {
 
     pegElement.addEventListener("click", () => handlePegAction(pegIndex));
     pegElement.addEventListener("dragover", (event) => {
-      if (draggedPeg !== null && canMove(pegs, draggedPeg, pegIndex)) {
+      if (!playbackLocked && draggedPeg !== null && canMove(pegs, draggedPeg, pegIndex)) {
         event.preventDefault();
       }
     });
     pegElement.addEventListener("drop", (event) => {
       event.preventDefault();
 
-      if (draggedPeg !== null) {
+      if (!playbackLocked && draggedPeg !== null) {
         applyMove(draggedPeg, pegIndex);
       }
 
@@ -535,7 +889,7 @@ function render(): void {
       diskElement.style.setProperty("--disk-color", diskColors[(disk - 1) % diskColors.length]);
       diskElement.textContent = String(disk);
       diskElement.setAttribute("aria-label", `ディスク ${disk}`);
-      diskElement.draggable = isTopDisk && !won && !autoplaying;
+      diskElement.draggable = isTopDisk && !won && !playbackLocked;
 
       if (isTopDisk) {
         diskElement.classList.add("top-disk");
@@ -546,7 +900,7 @@ function render(): void {
       }
 
       diskElement.addEventListener("dragstart", (event) => {
-        if (!isTopDisk || won || autoplaying) {
+        if (!isTopDisk || won || playbackLocked) {
           event.preventDefault();
           return;
         }
@@ -581,6 +935,14 @@ hintButton.addEventListener("click", showHint);
 stepButton.addEventListener("click", stepHint);
 autoButton.addEventListener("click", toggleAutoplay);
 autoSpeedSelect.addEventListener("change", restartAutoplayTimer);
+importLogButton.addEventListener("click", () => importLogInput.click());
+importLogInput.addEventListener("change", () => {
+  const file = importLogInput.files?.[0];
+
+  if (file) {
+    void importOperationLog(file);
+  }
+});
 logToggleButton.addEventListener("click", () => {
   const collapsed = logPanel.classList.toggle("collapsed");
   logToggleButton.setAttribute("aria-expanded", String(!collapsed));
