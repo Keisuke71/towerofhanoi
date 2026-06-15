@@ -13,45 +13,63 @@ import {
 
 const diskColors = ["#f06449", "#f6ae2d", "#4d9078", "#277da1", "#6d597a", "#43aa8b", "#bc4749", "#355070"];
 
-const board = document.querySelector<HTMLDivElement>("#board");
-const diskCountSelect = document.querySelector<HTMLSelectElement>("#diskCount");
-const resetButton = document.querySelector<HTMLButtonElement>("#resetButton");
-const undoButton = document.querySelector<HTMLButtonElement>("#undoButton");
-const hintButton = document.querySelector<HTMLButtonElement>("#hintButton");
-const stepButton = document.querySelector<HTMLButtonElement>("#stepButton");
-const autoButton = document.querySelector<HTMLButtonElement>("#autoButton");
-const autoSpeedSelect = document.querySelector<HTMLSelectElement>("#autoSpeed");
-const moveCount = document.querySelector<HTMLElement>("#moveCount");
-const minimumMoveCount = document.querySelector<HTMLElement>("#minimumMoves");
-const timer = document.querySelector<HTMLElement>("#timer");
-const message = document.querySelector<HTMLElement>("#message");
-const hintText = document.querySelector<HTMLElement>("#hintText");
-const gameState = document.querySelector<HTMLElement>("#gameState");
+function requiredElement<T extends Element>(selector: string): T {
+  const element = document.querySelector<T>(selector);
 
-if (
-  !board ||
-  !diskCountSelect ||
-  !resetButton ||
-  !undoButton ||
-  !hintButton ||
-  !stepButton ||
-  !autoButton ||
-  !autoSpeedSelect ||
-  !moveCount ||
-  !minimumMoveCount ||
-  !timer ||
-  !message ||
-  !hintText ||
-  !gameState
-) {
-  throw new Error("Required DOM elements are missing");
+  if (!element) {
+    throw new Error(`Required DOM element is missing: ${selector}`);
+  }
+
+  return element;
 }
+
+const board = requiredElement<HTMLDivElement>("#board");
+const diskCountSelect = requiredElement<HTMLSelectElement>("#diskCount");
+const resetButton = requiredElement<HTMLButtonElement>("#resetButton");
+const undoButton = requiredElement<HTMLButtonElement>("#undoButton");
+const hintButton = requiredElement<HTMLButtonElement>("#hintButton");
+const stepButton = requiredElement<HTMLButtonElement>("#stepButton");
+const autoButton = requiredElement<HTMLButtonElement>("#autoButton");
+const autoSpeedSelect = requiredElement<HTMLSelectElement>("#autoSpeed");
+const moveCount = requiredElement<HTMLElement>("#moveCount");
+const minimumMoveCount = requiredElement<HTMLElement>("#minimumMoves");
+const timer = requiredElement<HTMLElement>("#timer");
+const message = requiredElement<HTMLElement>("#message");
+const hintText = requiredElement<HTMLElement>("#hintText");
+const gameState = requiredElement<HTMLElement>("#gameState");
+const logPanel = requiredElement<HTMLElement>("#logPanel");
+const logToggleButton = requiredElement<HTMLButtonElement>("#logToggleButton");
+const logCount = requiredElement<HTMLElement>("#logCount");
+const logList = requiredElement<HTMLOListElement>("#logList");
+const logEmptyState = requiredElement<HTMLElement>("#logEmptyState");
+const exportLogButton = requiredElement<HTMLButtonElement>("#exportLogButton");
+
+type OperationLogAction = "move" | "step" | "auto" | "undo";
+
+interface OperationLogEntry {
+  sequence: number;
+  timestamp: string;
+  elapsedSeconds: string;
+  action: OperationLogAction;
+  disk: number;
+  from: PegIndex;
+  to: PegIndex;
+  moveCount: number;
+}
+
+const operationLabels: Record<OperationLogAction, string> = {
+  move: "移動",
+  step: "一手進める",
+  auto: "オート再生",
+  undo: "戻す"
+};
 
 let diskCount = Number(diskCountSelect.value);
 let pegs = createInitialPegs(diskCount);
 let selectedPeg: PegIndex | null = null;
 let draggedPeg: PegIndex | null = null;
 let moveHistory: Move[] = [];
+let operationLog: OperationLogEntry[] = [];
 let currentHint: Move | null = null;
 let startedAt: number | null = null;
 let elapsedBeforeStart = 0;
@@ -117,6 +135,90 @@ function describeMove(move: Move): string {
   return `${pegNames[move.from]} -> ${pegNames[move.to]}`;
 }
 
+function formatElapsedSeconds(milliseconds: number): string {
+  return (Math.round(milliseconds / 10) / 100).toFixed(2);
+}
+
+function csvEscape(value: string | number): string {
+  const stringValue = String(value);
+  return /[",\n\r]/.test(stringValue) ? `"${stringValue.replaceAll('"', '""')}"` : stringValue;
+}
+
+function renderOperationLog(): void {
+  logList.innerHTML = "";
+  logCount.textContent = String(operationLog.length);
+  logEmptyState.hidden = operationLog.length > 0;
+  exportLogButton.disabled = operationLog.length === 0;
+
+  operationLog.forEach((entry) => {
+    const item = document.createElement("li");
+    item.className = "log-item";
+
+    const timestamp = document.createElement("span");
+    timestamp.className = "log-time";
+    timestamp.textContent = entry.timestamp;
+
+    const detail = document.createElement("span");
+    detail.className = "log-detail";
+
+    const action = document.createElement("span");
+    action.className = "log-action";
+    action.textContent = `${operationLabels[entry.action]} ${pegNames[entry.from]} -> ${pegNames[entry.to]}`;
+
+    const meta = document.createElement("span");
+    meta.className = "log-meta";
+    meta.textContent = `ディスク ${entry.disk} / 手数 ${entry.moveCount}`;
+
+    detail.append(action, meta);
+    item.append(timestamp, detail);
+    logList.append(item);
+  });
+
+  logList.scrollTop = logList.scrollHeight;
+}
+
+function recordOperation(action: OperationLogAction, move: Move): void {
+  const elapsed = getElapsed();
+  operationLog.push({
+    sequence: operationLog.length + 1,
+    timestamp: formatDuration(elapsed),
+    elapsedSeconds: formatElapsedSeconds(elapsed),
+    action,
+    disk: move.disk,
+    from: move.from,
+    to: move.to,
+    moveCount: moveHistory.length
+  });
+}
+
+function createLogCsv(): string {
+  const rows = [
+    ["index", "timestamp", "timestamp_seconds", "operation", "disk", "from", "to", "move_count"],
+    ...operationLog.map((entry) => [
+      entry.sequence,
+      entry.timestamp,
+      entry.elapsedSeconds,
+      operationLabels[entry.action],
+      entry.disk,
+      pegNames[entry.from],
+      pegNames[entry.to],
+      entry.moveCount
+    ])
+  ];
+
+  return rows.map((row) => row.map(csvEscape).join(",")).join("\n");
+}
+
+function exportOperationLog(): void {
+  const blob = new Blob([`\uFEFF${createLogCsv()}`], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = `tower-of-hanoi-log-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function clearHint(): void {
   currentHint = null;
   hintText.textContent = "";
@@ -158,6 +260,7 @@ function resetGame(nextDiskCount = diskCount): void {
   selectedPeg = null;
   draggedPeg = null;
   moveHistory = [];
+  operationLog = [];
   won = false;
   clearHint();
   resetTimer();
@@ -165,7 +268,11 @@ function resetGame(nextDiskCount = diskCount): void {
   render();
 }
 
-function applyMove(from: PegIndex, to: PegIndex, options: { record: boolean } = { record: true }): boolean {
+function applyMove(
+  from: PegIndex,
+  to: PegIndex,
+  options: { record?: boolean; action?: OperationLogAction } = {}
+): boolean {
   const moved = moveDisk(pegs, from, to);
 
   if (!moved) {
@@ -176,9 +283,10 @@ function applyMove(from: PegIndex, to: PegIndex, options: { record: boolean } = 
 
   pegs = moved.pegs;
 
-  if (options.record) {
+  if (options.record ?? true) {
     moveHistory.push(moved.move);
     startTimer();
+    recordOperation(options.action ?? "move", moved.move);
   }
 
   selectedPeg = null;
@@ -257,6 +365,7 @@ function undoMove(): void {
   selectedPeg = null;
   won = false;
   clearHint();
+  recordOperation("undo", moved.move);
 
   if (moveHistory.length === 0) {
     resetTimer();
@@ -297,7 +406,7 @@ function stepHint(): void {
     return;
   }
 
-  applyMove(hint.from, hint.to);
+  applyMove(hint.from, hint.to, { action: "step" });
 }
 
 function runAutoplayStep(): void {
@@ -313,7 +422,7 @@ function runAutoplayStep(): void {
     return;
   }
 
-  applyMove(hint.from, hint.to);
+  applyMove(hint.from, hint.to, { action: "auto" });
 
   if (won) {
     stopAutoplay({ renderView: true });
@@ -364,6 +473,7 @@ function render(): void {
   stepButton.disabled = autoplaying || won;
   autoButton.disabled = won;
   autoButton.textContent = autoplaying ? "停止" : "オート再生";
+  renderOperationLog();
 
   pegs.forEach((pegDisks, rawPegIndex) => {
     const pegIndex = asPegIndex(rawPegIndex);
@@ -471,5 +581,10 @@ hintButton.addEventListener("click", showHint);
 stepButton.addEventListener("click", stepHint);
 autoButton.addEventListener("click", toggleAutoplay);
 autoSpeedSelect.addEventListener("change", restartAutoplayTimer);
+logToggleButton.addEventListener("click", () => {
+  const collapsed = logPanel.classList.toggle("collapsed");
+  logToggleButton.setAttribute("aria-expanded", String(!collapsed));
+});
+exportLogButton.addEventListener("click", exportOperationLog);
 
 resetGame();

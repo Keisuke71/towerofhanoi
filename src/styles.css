@@ -106,11 +106,181 @@ h1 {
   line-height: 1;
 }
 
+.game-shell {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 16px;
+  padding: 0 clamp(14px, 4vw, 48px) 24px;
+}
+
+.operation-log {
+  display: grid;
+  min-height: 0;
+  max-height: calc(100vh - 118px);
+  grid-template-rows: auto 1fr;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgba(23, 32, 38, 0.08);
+  overflow: hidden;
+}
+
+.operation-log.collapsed {
+  width: 58px;
+  grid-template-rows: 1fr;
+}
+
+.game-shell:has(.operation-log.collapsed) {
+  grid-template-columns: 58px minmax(0, 1fr);
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.log-toggle {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 38px;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.log-toggle::before {
+  width: 18px;
+  content: "<";
+  color: var(--accent-strong);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.operation-log.collapsed .log-header {
+  align-items: center;
+  justify-content: center;
+  border-bottom: 0;
+  padding: 8px;
+}
+
+.operation-log.collapsed .log-toggle {
+  writing-mode: vertical-rl;
+}
+
+.operation-log.collapsed .log-toggle::before {
+  content: ">";
+}
+
+.operation-log.collapsed .log-count,
+.operation-log.collapsed .log-content {
+  display: none;
+}
+
+.log-count {
+  display: inline-grid;
+  min-width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.log-content {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: 1fr auto;
+}
+
+.log-list {
+  min-height: 0;
+  margin: 0;
+  padding: 8px;
+  list-style: none;
+  overflow: auto;
+}
+
+.log-item {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 8px;
+  padding: 9px 6px;
+  border-bottom: 1px solid rgba(23, 32, 38, 0.1);
+}
+
+.log-time {
+  color: var(--accent-strong);
+  font-size: 0.8rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-detail {
+  min-width: 0;
+}
+
+.log-action {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.log-meta {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.log-empty {
+  align-self: start;
+  margin: 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.log-list:not(:empty) + .log-empty {
+  display: none;
+}
+
+.export-log {
+  min-height: 40px;
+  margin: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.export-log:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .play-area {
   display: grid;
   grid-template-rows: auto minmax(320px, 1fr) auto;
   gap: 14px;
-  padding: 0 clamp(14px, 4vw, 48px) 24px;
+  min-width: 0;
 }
 
 .toolbar,
@@ -342,6 +512,31 @@ select {
 
   .stats div {
     text-align: left;
+  }
+
+  .game-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .operation-log {
+    max-height: 220px;
+  }
+
+  .operation-log.collapsed {
+    width: auto;
+    min-height: 54px;
+  }
+
+  .game-shell:has(.operation-log.collapsed) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .operation-log.collapsed .log-header {
+    justify-content: flex-start;
+  }
+
+  .operation-log.collapsed .log-toggle {
+    writing-mode: horizontal-tb;
   }
 
   .toolbar {

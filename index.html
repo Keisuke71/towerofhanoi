@@ -32,40 +32,62 @@
         </dl>
       </header>
 
-      <main class="play-area">
-        <section class="toolbar" aria-label="ゲーム操作">
-          <label class="select-field" for="diskCount">
-            <span>ディスク</span>
-            <select id="diskCount">
-              <option value="3">3</option>
-              <option value="4" selected>4</option>
-              <option value="5">5</option>
-              <option value="6">6</option>
-              <option value="7">7</option>
-              <option value="8">8</option>
-            </select>
-          </label>
-          <button id="resetButton" type="button">リセット</button>
-          <button id="undoButton" type="button">戻す</button>
-          <button id="hintButton" type="button">ヒント</button>
-          <button id="stepButton" type="button">一手進める</button>
-          <button id="autoButton" type="button">オート再生</button>
-          <label class="select-field" for="autoSpeed">
-            <span>速度</span>
-            <select id="autoSpeed">
-              <option value="900">ゆっくり</option>
-              <option value="520" selected>標準</option>
-              <option value="240">高速</option>
-            </select>
-          </label>
-        </section>
+      <main class="game-shell">
+        <aside id="logPanel" class="operation-log" aria-label="操作ログ">
+          <div class="log-header">
+            <button
+              id="logToggleButton"
+              class="log-toggle"
+              type="button"
+              aria-expanded="true"
+              aria-controls="logContent"
+            >
+              操作ログ
+            </button>
+            <span id="logCount" class="log-count">0</span>
+          </div>
+          <div id="logContent" class="log-content">
+            <ol id="logList" class="log-list"></ol>
+            <p id="logEmptyState" class="log-empty">操作はまだありません。</p>
+            <button id="exportLogButton" class="export-log" type="button" disabled>CSV出力</button>
+          </div>
+        </aside>
 
-        <section id="board" class="board" aria-label="ハノイの塔の盤面"></section>
+        <div class="play-area">
+          <section class="toolbar" aria-label="ゲーム操作">
+            <label class="select-field" for="diskCount">
+              <span>ディスク</span>
+              <select id="diskCount">
+                <option value="3">3</option>
+                <option value="4" selected>4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+              </select>
+            </label>
+            <button id="resetButton" type="button">リセット</button>
+            <button id="undoButton" type="button">戻す</button>
+            <button id="hintButton" type="button">ヒント</button>
+            <button id="stepButton" type="button">一手進める</button>
+            <button id="autoButton" type="button">オート再生</button>
+            <label class="select-field" for="autoSpeed">
+              <span>速度</span>
+              <select id="autoSpeed">
+                <option value="900">ゆっくり</option>
+                <option value="520" selected>標準</option>
+                <option value="240">高速</option>
+              </select>
+            </label>
+          </section>
 
-        <section class="status-bar" aria-live="polite">
-          <p id="message">左の塔から右の塔へすべて移動します。</p>
-          <p id="hintText"></p>
-        </section>
+          <section id="board" class="board" aria-label="ハノイの塔の盤面"></section>
+
+          <section class="status-bar" aria-live="polite">
+            <p id="message">左の塔から右の塔へすべて移動します。</p>
+            <p id="hintText"></p>
+          </section>
+        </div>
       </main>
     </div>
 
