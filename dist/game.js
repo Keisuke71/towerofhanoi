@@ -1,10 +1,66 @@
 export const pegNames = ["A", "B", "C"];
 const pegIndexes = [0, 1, 2];
-export function createInitialPegs(diskCount) {
+const maxSearchStates = 500000;
+export function createInitialPegs(diskCount, source = 0) {
   if (!Number.isInteger(diskCount) || diskCount < 1) {
     throw new Error("diskCount must be a positive integer");
   }
-  return [Array.from({ length: diskCount }, (_, index) => diskCount - index), [], []];
+  const pegs = [[], [], []];
+  pegs[source] = Array.from({ length: diskCount }, (_, index) => diskCount - index);
+  return pegs;
+}
+export function createRandomPegs(diskCount, target = 2, random = Math.random) {
+  if (!Number.isInteger(diskCount) || diskCount < 1) {
+    throw new Error("diskCount must be a positive integer");
+  }
+  const pegs = [[], [], []];
+  for (let disk = diskCount; disk >= 1; disk -= 1) {
+    const peg = Math.min(2, Math.max(0, Math.floor(random() * 3)));
+    pegs[peg].push(disk);
+  }
+  if (isSolved(pegs, diskCount, target)) {
+    const alternatePeg = pegIndexes.find((peg) => peg !== target);
+    if (alternatePeg === undefined) {
+      throw new Error("No alternate peg is available");
+    }
+    pegs[target].pop();
+    pegs[alternatePeg].push(1);
+  }
+  return pegs;
+}
+export function hasLegalPegOrder(pegs) {
+  return pegs.every((peg) => peg.every((disk, index) => index === peg.length - 1 || disk > peg[index + 1]));
+}
+export function createRulelessRandomPegs(diskCount, target = 2, random = Math.random) {
+  if (!Number.isInteger(diskCount) || diskCount < 1) {
+    throw new Error("diskCount must be a positive integer");
+  }
+  const disks = Array.from({ length: diskCount }, (_, index) => index + 1);
+  for (let index = disks.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.min(index, Math.max(0, Math.floor(random() * (index + 1))));
+    [disks[index], disks[swapIndex]] = [disks[swapIndex], disks[index]];
+  }
+  const pegs = [[], [], []];
+  disks.forEach((disk) => {
+    const peg = Math.min(2, Math.max(0, Math.floor(random() * 3)));
+    pegs[peg].push(disk);
+  });
+  if (diskCount > 1 && hasLegalPegOrder(pegs)) {
+    const forcedPeg = pegIndexes.find((peg) => peg !== target);
+    if (forcedPeg === undefined) {
+      throw new Error("No alternate peg is available");
+    }
+    const remainingDisks = disks.filter((disk) => disk !== 1 && disk !== diskCount);
+    pegs[0] = [];
+    pegs[1] = [];
+    pegs[2] = [];
+    pegs[forcedPeg].push(1, diskCount);
+    remainingDisks.forEach((disk) => {
+      const peg = Math.min(2, Math.max(0, Math.floor(random() * 3)));
+      pegs[peg].push(disk);
+    });
+  }
+  return pegs;
 }
 export function topDisk(pegs, peg) {
   return pegs[peg].at(-1);
@@ -52,17 +108,59 @@ export function deserializePegs(state) {
   }
   return pegs;
 }
+export function serializeOrderedPegs(pegs) {
+  return pegs.map((peg) => peg.join(",")).join("|");
+}
+export function deserializeOrderedPegs(state) {
+  return state.split("|").map((peg) => peg === "" ? [] : peg.split(",").map(Number));
+}
+export function shortestMoveCount(pegs, diskCount, target = 2) {
+  if (isSolved(pegs, diskCount, target)) {
+    return 0;
+  }
+  const start = serializeOrderedPegs(pegs);
+  const goal = serializeOrderedPegs(createInitialPegs(diskCount, target));
+  const queue = [start];
+  const distances = new Map([[start, 0]]);
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const state = queue[cursor];
+    const statePegs = deserializeOrderedPegs(state);
+    const distance = distances.get(state) ?? 0;
+    for (const from of pegIndexes) {
+      for (const to of pegIndexes) {
+        const moved = moveDisk(statePegs, from, to);
+        if (!moved) {
+          continue;
+        }
+        const next = serializeOrderedPegs(moved.pegs);
+        if (distances.has(next)) {
+          continue;
+        }
+        const nextDistance = distance + 1;
+        if (next === goal) {
+          return nextDistance;
+        }
+        distances.set(next, nextDistance);
+        queue.push(next);
+        if (queue.length >= maxSearchStates) {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
 export function findHint(pegs, diskCount, target = 2) {
   if (isSolved(pegs, diskCount, target)) {
     return null;
   }
-  const start = serializePegs(pegs, diskCount);
-  const goal = String(target).repeat(diskCount);
+  const start = serializeOrderedPegs(pegs);
+  const goal = serializeOrderedPegs(createInitialPegs(diskCount, target));
   const queue = [start];
   const firstMoves = new Map([[start, null]]);
   for (let cursor = 0; cursor < queue.length; cursor += 1) {
     const state = queue[cursor];
-    const statePegs = deserializePegs(state);
+    const statePegs = deserializeOrderedPegs(state);
     const firstMove = firstMoves.get(state) ?? null;
     for (const from of pegIndexes) {
       for (const to of pegIndexes) {
@@ -70,7 +168,7 @@ export function findHint(pegs, diskCount, target = 2) {
         if (!moved) {
           continue;
         }
-        const next = serializePegs(moved.pegs, diskCount);
+        const next = serializeOrderedPegs(moved.pegs);
         if (firstMoves.has(next)) {
           continue;
         }
@@ -80,6 +178,9 @@ export function findHint(pegs, diskCount, target = 2) {
         }
         firstMoves.set(next, nextFirstMove);
         queue.push(next);
+        if (queue.length >= maxSearchStates) {
+          return null;
+        }
       }
     }
   }
