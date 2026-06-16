@@ -66,7 +66,25 @@
                 <option value="8">8</option>
               </select>
             </label>
+            <label class="select-field" for="sourcePeg">
+              <span>開始</span>
+              <select id="sourcePeg">
+                <option value="0" selected>A</option>
+                <option value="1">B</option>
+                <option value="2">C</option>
+              </select>
+            </label>
+            <label class="select-field" for="targetPeg">
+              <span>ゴール</span>
+              <select id="targetPeg">
+                <option value="0">A</option>
+                <option value="1">B</option>
+                <option value="2" selected>C</option>
+              </select>
+            </label>
             <button id="resetButton" type="button">リセット</button>
+            <button id="randomButton" type="button">ランダム</button>
+            <button id="rulelessRandomButton" type="button">ルール無視ランダム</button>
             <button id="undoButton" type="button">戻す</button>
             <button id="hintButton" type="button">ヒント</button>
             <button id="stepButton" type="button">一手進める</button>
@@ -86,7 +104,7 @@
           <section id="board" class="board" aria-label="ハノイの塔の盤面"></section>
 
           <section class="status-bar" aria-live="polite">
-            <p id="message">左の塔から右の塔へすべて移動します。</p>
+            <p id="message">A の塔から C の塔へすべて移動します。</p>
             <p id="hintText"></p>
           </section>
         </div>

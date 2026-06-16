@@ -3,12 +3,14 @@ import {
   PegIndex,
   canMove,
   createInitialPegs,
+  createRandomPegs,
+  createRulelessRandomPegs,
   findHint,
   formatDuration,
   isSolved,
-  minimumMoves,
   moveDisk,
-  pegNames
+  pegNames,
+  shortestMoveCount
 } from "./game.js";
 
 const diskColors = ["#f06449", "#f6ae2d", "#4d9078", "#277da1", "#6d597a", "#43aa8b", "#bc4749", "#355070"];
@@ -25,7 +27,11 @@ function requiredElement<T extends Element>(selector: string): T {
 
 const board = requiredElement<HTMLDivElement>("#board");
 const diskCountSelect = requiredElement<HTMLSelectElement>("#diskCount");
+const sourcePegSelect = requiredElement<HTMLSelectElement>("#sourcePeg");
+const targetPegSelect = requiredElement<HTMLSelectElement>("#targetPeg");
 const resetButton = requiredElement<HTMLButtonElement>("#resetButton");
+const randomButton = requiredElement<HTMLButtonElement>("#randomButton");
+const rulelessRandomButton = requiredElement<HTMLButtonElement>("#rulelessRandomButton");
 const undoButton = requiredElement<HTMLButtonElement>("#undoButton");
 const hintButton = requiredElement<HTMLButtonElement>("#hintButton");
 const stepButton = requiredElement<HTMLButtonElement>("#stepButton");
@@ -90,7 +96,9 @@ const operationLabelLookup = new Map<string, OperationLogAction>([
 ]);
 
 let diskCount = Number(diskCountSelect.value);
-let pegs = createInitialPegs(diskCount);
+let sourcePeg: PegIndex = 0;
+let targetPeg: PegIndex = 2;
+let pegs = createInitialPegs(diskCount, sourcePeg);
 let selectedPeg: PegIndex | null = null;
 let draggedPeg: PegIndex | null = null;
 let moveHistory: Move[] = [];
@@ -104,6 +112,7 @@ let replayId: number | null = null;
 let replaySteps: ImportedOperation[] = [];
 let replayCursor = 0;
 let won = false;
+const shortestMoveCache = new Map<string, number | null>();
 
 function asPegIndex(value: number): PegIndex {
   if (value !== 0 && value !== 1 && value !== 2) {
@@ -111,6 +120,75 @@ function asPegIndex(value: number): PegIndex {
   }
 
   return value;
+}
+
+const pegIndexes: PegIndex[] = [0, 1, 2];
+
+function selectedPegValue(select: HTMLSelectElement): PegIndex {
+  return asPegIndex(Number(select.value));
+}
+
+function syncPegSelectors(): void {
+  sourcePegSelect.value = String(sourcePeg);
+  targetPegSelect.value = String(targetPeg);
+
+  for (const option of sourcePegSelect.options) {
+    option.disabled = Number(option.value) === targetPeg;
+  }
+
+  for (const option of targetPegSelect.options) {
+    option.disabled = Number(option.value) === sourcePeg;
+  }
+}
+
+function normalizePegSelectors(changed: "source" | "target"): void {
+  sourcePeg = selectedPegValue(sourcePegSelect);
+  targetPeg = selectedPegValue(targetPegSelect);
+
+  if (sourcePeg === targetPeg) {
+    const fallbackPeg = pegIndexes.find((peg) => peg !== sourcePeg);
+
+    if (fallbackPeg === undefined) {
+      throw new Error("No alternate peg is available");
+    }
+
+    if (changed === "source") {
+      targetPeg = fallbackPeg;
+    } else {
+      sourcePeg = fallbackPeg;
+    }
+  }
+
+  syncPegSelectors();
+}
+
+function goalMessage(): string {
+  return `${pegNames[sourcePeg]} の塔から ${pegNames[targetPeg]} の塔へすべて移動します。`;
+}
+
+function shortestMoveCacheKey(): string {
+  return `${diskCount}:${targetPeg}:${JSON.stringify(pegs)}`;
+}
+
+function getShortestMoveCount(): number | null {
+  const key = shortestMoveCacheKey();
+  const cached = shortestMoveCache.get(key);
+
+  if (cached !== undefined || shortestMoveCache.has(key)) {
+    return cached ?? null;
+  }
+
+  const count = shortestMoveCount(pegs, diskCount, targetPeg);
+  shortestMoveCache.set(key, count);
+  return count;
+}
+
+function formatShortestMoveText(count: number | null): string {
+  return count === null ? "—" : String(count);
+}
+
+function shortestMoveMessage(count: number | null): string {
+  return count === null ? "最短手数は計算上限を超えました。" : `最短 ${count} 手で完成できます。`;
 }
 
 function startTimer(): void {
@@ -470,7 +548,7 @@ function resetGame(nextDiskCount = diskCount): void {
   stopImportedReplay({ renderView: false });
   diskCount = nextDiskCount;
   diskCountSelect.value = String(diskCount);
-  pegs = createInitialPegs(diskCount);
+  pegs = createInitialPegs(diskCount, sourcePeg);
   selectedPeg = null;
   draggedPeg = null;
   moveHistory = [];
@@ -478,7 +556,41 @@ function resetGame(nextDiskCount = diskCount): void {
   won = false;
   clearHint();
   resetTimer();
-  setMessage("左の塔から右の塔へすべて移動します。");
+  setMessage(goalMessage());
+  render();
+}
+
+function randomizeGame(): void {
+  if (isPlaybackLocked()) {
+    return;
+  }
+
+  pegs = createRandomPegs(diskCount, targetPeg);
+  selectedPeg = null;
+  draggedPeg = null;
+  moveHistory = [];
+  operationLog = [];
+  won = false;
+  clearHint();
+  resetTimer();
+  setMessage(`ランダムな盤面に変更しました。${shortestMoveMessage(getShortestMoveCount())}`);
+  render();
+}
+
+function randomizeRulelessGame(): void {
+  if (isPlaybackLocked()) {
+    return;
+  }
+
+  pegs = createRulelessRandomPegs(diskCount, targetPeg);
+  selectedPeg = null;
+  draggedPeg = null;
+  moveHistory = [];
+  operationLog = [];
+  won = false;
+  clearHint();
+  resetTimer();
+  setMessage(`ルール無視の盤面に変更しました。移動ルールは通常通りです。${shortestMoveMessage(getShortestMoveCount())}`);
   render();
 }
 
@@ -528,7 +640,7 @@ function applyImportedStep(step: ImportedOperation): boolean {
   selectedPeg = null;
   draggedPeg = null;
   clearHint();
-  won = isSolved(pegs, diskCount);
+  won = isSolved(pegs, diskCount, targetPeg);
   setMessage(`${step.rowNumber}行目: ${describeMove(moved.move)} を再生しました。`);
   return true;
 }
@@ -616,7 +728,7 @@ function applyMove(
 
   selectedPeg = null;
   clearHint();
-  won = isSolved(pegs, diskCount);
+  won = isSolved(pegs, diskCount, targetPeg);
 
   if (won) {
     stopTimer();
@@ -707,7 +819,7 @@ function showHint(): void {
     return;
   }
 
-  const hint = findHint(pegs, diskCount);
+  const hint = findHint(pegs, diskCount, targetPeg);
 
   if (!hint) {
     setMessage(won ? "完成しています。" : "ヒントを見つけられませんでした。");
@@ -724,7 +836,7 @@ function stepHint(): void {
     return;
   }
 
-  const hint = currentHint ?? findHint(pegs, diskCount);
+  const hint = currentHint ?? findHint(pegs, diskCount, targetPeg);
 
   if (!hint) {
     setMessage(won ? "完成しています。" : "進める手がありません。");
@@ -740,7 +852,7 @@ function runAutoplayStep(): void {
     return;
   }
 
-  const hint = findHint(pegs, diskCount);
+  const hint = findHint(pegs, diskCount, targetPeg);
 
   if (!hint) {
     stopAutoplay({ message: "進める手がありません。" });
@@ -807,9 +919,10 @@ function render(): void {
   const autoplaying = isAutoplaying();
   const replaying = isReplaying();
   const playbackLocked = autoplaying || replaying;
+  syncPegSelectors();
   board.innerHTML = "";
   moveCount.textContent = String(moveHistory.length);
-  minimumMoveCount.textContent = String(minimumMoves(diskCount));
+  minimumMoveCount.textContent = formatShortestMoveText(getShortestMoveCount());
   gameState.textContent = won
     ? "完成"
     : replaying
@@ -820,6 +933,10 @@ function render(): void {
           ? "プレイ中"
           : `${pegNames[selectedPeg]} 選択中`;
   diskCountSelect.disabled = playbackLocked;
+  sourcePegSelect.disabled = playbackLocked;
+  targetPegSelect.disabled = playbackLocked;
+  randomButton.disabled = playbackLocked;
+  rulelessRandomButton.disabled = playbackLocked;
   undoButton.disabled = playbackLocked || moveHistory.length === 0;
   hintButton.disabled = playbackLocked || won;
   stepButton.disabled = playbackLocked || won;
@@ -848,6 +965,14 @@ function render(): void {
 
     if (currentHint?.to === pegIndex) {
       pegElement.classList.add("hint-to");
+    }
+
+    if (sourcePeg === pegIndex) {
+      pegElement.classList.add("source-peg");
+    }
+
+    if (targetPeg === pegIndex) {
+      pegElement.classList.add("target-peg");
     }
 
     pegElement.addEventListener("click", () => handlePegAction(pegIndex));
@@ -918,7 +1043,11 @@ function render(): void {
 
     const label = document.createElement("span");
     label.className = "peg-label";
-    label.textContent = pegNames[pegIndex];
+    const pegRoles = [
+      ...(sourcePeg === pegIndex ? ["開始"] : []),
+      ...(targetPeg === pegIndex ? ["ゴール"] : [])
+    ];
+    label.textContent = pegRoles.length > 0 ? `${pegNames[pegIndex]} (${pegRoles.join(" / ")})` : pegNames[pegIndex];
 
     pegElement.append(stack, label);
     board.append(pegElement);
@@ -929,7 +1058,19 @@ diskCountSelect.addEventListener("change", () => {
   resetGame(Number(diskCountSelect.value));
 });
 
+sourcePegSelect.addEventListener("change", () => {
+  normalizePegSelectors("source");
+  resetGame();
+});
+
+targetPegSelect.addEventListener("change", () => {
+  normalizePegSelectors("target");
+  resetGame();
+});
+
 resetButton.addEventListener("click", () => resetGame());
+randomButton.addEventListener("click", randomizeGame);
+rulelessRandomButton.addEventListener("click", randomizeRulelessGame);
 undoButton.addEventListener("click", undoMove);
 hintButton.addEventListener("click", showHint);
 stepButton.addEventListener("click", stepHint);
